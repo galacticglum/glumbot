@@ -23,7 +23,7 @@ _LOG_LEVEL_FORMATS = {
     logging.INFO: '{} - %(message)s'.format(colourize_string('%(name)s', colorama.Fore.LIGHTWHITE_EX))
 }
 
-_LOGGER_FORMAT = '%(name)s - %(levelname)s: %(message)s'
+_LOGGER_FORMAT = '{} - %(levelname)s: %(message)s'.format(colourize_string('%(name)s', colorama.Fore.LIGHTWHITE_EX))
 
 def init(name=None):
     class ColourizedLoggerFormat(logging.Formatter):
