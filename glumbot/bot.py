@@ -46,12 +46,15 @@ class Bot(twitchio.ext.commands.Bot):
                     'items': {
                         'type': 'string'
                     }
+                },
+                'parameters': {
+                    'type': 'object'
                 }
             },
         'required': ['name'],
         'anyOf': [
             {'required': ['response']},
-            {'required': ['email']}
+            {'required': ['script']}
         ]
     }
 
@@ -109,7 +112,7 @@ class Bot(twitchio.ext.commands.Bot):
                 try:
                     validate_json(instance=command, schema=Bot._COMMAND_JSON_SCHEMA)
                 except:
-                    error_message = 'Could not load command with name {} from file \'{{}}\''.format(command['name']) if 'name' in command \
+                    error_message = 'Could not load command with name \'{}\' from file \'{{}}\''.format(command['name']) if 'name' in command \
                         else 'Could not load command from file \'{}\'.'
                         
                     self.logger.exception(error_message.format(command_filepath_str))
@@ -117,7 +120,6 @@ class Bot(twitchio.ext.commands.Bot):
 
                 command_id = str(uuid.uuid4()).replace('-', '_')
                 method_name = 'commandhandler_{}_{}'.format(command['name'], command_id)
-                command_aliases = command['aliases'] if 'aliases' in command else None
 
                 script_module = None
                 if 'script' in command:
@@ -135,10 +137,10 @@ class Bot(twitchio.ext.commands.Bot):
                     # Verify that the execute method has a valid signature...
                     if hasattr(script_module, 'execute'):
                         valid = True
-                        if len(inspect.signature(script_module.execute).parameters) < 2:
+                        if len(inspect.signature(script_module.execute).parameters) < 3:
                             self.logger.warn('Encountered error in processing custom script for command with name \'{}\'. \
                                 The execute method has an invalid signature. At least two parameters are required for the class \
-                                instance and context parameters; \'self\' and \'ctx\' respectively.'.format(command['name']))
+                                instance and context parameters; \'self\', \'ctx\', and \'parameters\' respectively.'.format(command['name']))
 
                             valid = False
                         elif not inspect.iscoroutinefunction(script_module.execute):
@@ -150,15 +152,26 @@ class Bot(twitchio.ext.commands.Bot):
 
                         if not valid:
                             delattr(script_module, 'execute')
+                
+                def create_command_func(command, script_module):
+                    async def _command_handler(self, ctx, *args):
+                        if 'response' in command:
+                            await ctx.send(command['response'])
 
-                @twitchio.ext.commands.command(name=command['name'], aliases=command_aliases)
-                async def _command_handler(self, ctx):
-                    if 'response' in command:
-                        await ctx.send(command['response'])
                         if script_module and hasattr(script_module, 'execute'):
-                            await script_module.execute(self, ctx)
+                            parameters = command['parameters'] if 'parameters' in command else None
+                            await script_module.execute(self, ctx, parameters, *args)
 
-                setattr(self.__class__, method_name, _command_handler)
+                    return _command_handler
+
+                command_object = twitchio.ext.commands.Command(
+                    name=command['name'], 
+                    func=create_command_func(command, script_module), 
+                    aliases=command['aliases'] if 'aliases' in command else None, 
+                    no_global_checks=False
+                )
+
+                setattr(self.__class__, method_name, command_object)
                 count += 1
 
         self.logger.info('Finished loading commands ({}).'.format(count))
