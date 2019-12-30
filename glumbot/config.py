@@ -28,14 +28,14 @@ class Config(object):
         # use the parent directory.
         if root_path.is_file():
             root_path = root_path.parent()
-
+   
         path = root_path / Path(filename)
         if path.exists():
             spec = importlib.util.spec_from_file_location('{}.py'.format(path.stem), path.resolve())
             config_module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(config_module)
 
-            for key in config_module.__dict__:
+            for key in vars(config_module):
                 if key in self._CONFIG and not overwrite: continue
                 self._CONFIG[key] = config_module.__dict__[key]
 
