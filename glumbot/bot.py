@@ -7,7 +7,7 @@ from pathlib import Path
 
 from glumbot.logger import init as init_logger
 from glumbot.config import Config
-from glumbot.nlp_qa.model import init_model as init_nlp_model
+from glumbot.nlp_qa.model import Model as NLPModel, ModelType as NLPModelType
 import twitchio.ext.commands
 
 class Bot(twitchio.ext.commands.Bot):
@@ -18,7 +18,8 @@ class Bot(twitchio.ext.commands.Bot):
         'DISPLAY_OWN_MESSAGES': False,
         'USE_NLP_QA': False,
         'NLP_QA_PREFIX': '>',
-        'NLP_QA_DATA_FORMAT': 'csv'
+        'NLP_QA_DATA_FORMAT': 'csv',
+        'NLP_MODEL_TYPE': NLPModelType.FAST_TEXT
     }
 
     _COMMANDS_JSON_SCHEMA = {
@@ -166,7 +167,7 @@ class Bot(twitchio.ext.commands.Bot):
         if not self.config['USE_NLP_QA']: return
 
         data_path = str(Path(self.config['NLP_QA_DATA_PATH']).resolve().absolute())
-        self.nlp_qa_model = init_nlp_model(data_path, self.config['NLP_QA_DATA_FORMAT'])
+        self.nlp_qa_model = NLPModel(self.config['NLP_MODEL_TYPE'], data_path, self.config['NLP_QA_DATA_FORMAT'])
         self.logger.info('Finished building NLP QA model.')
 
     async def event_ready(self):
@@ -189,11 +190,13 @@ class Bot(twitchio.ext.commands.Bot):
 
         if self.config['USE_NLP_QA'] and message.content.startswith(self.config['NLP_QA_PREFIX']):
             clean_message = message.content[1:].strip()
-            prediction = self.nlp_qa_model([clean_message])
-            if len(prediction[0]) > 0:                
-                ctx = await self.get_context(message)
-                print()
-                await ctx.send(prediction[0][0])
+            ctx = await self.get_context(message)
+
+            prediction, confidence = self.nlp_qa_model.predict([clean_message])
+            self.logger.info('Matched NLP query (message = "{}", prediction = \"{}\", confidence = {:.3f})' \
+                .format(clean_message, prediction, confidence))
+
+            await ctx.send(prediction)
         else:
             try:
                 await self.handle_commands(message)

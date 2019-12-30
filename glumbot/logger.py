@@ -1,9 +1,7 @@
 import re
-import time
 import copy
 import logging
 import colorama
-import datetime
 
 def colourize_string(string, colour):
     return '{colour_begin}{string}{colour_end}'.format(
