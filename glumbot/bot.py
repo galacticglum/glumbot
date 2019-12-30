@@ -7,6 +7,7 @@ from pathlib import Path
 
 from glumbot.logger import init as init_logger
 from glumbot.config import Config
+from glumbot.nlp_qa.model import init_model as init_nlp_model
 import twitchio.ext.commands
 
 class Bot(twitchio.ext.commands.Bot):
@@ -14,6 +15,10 @@ class Bot(twitchio.ext.commands.Bot):
         'APP_NAME': __name__,
         'PREFIX': '!',
         'DISPLAY_MESSAGES': True,
+        'DISPLAY_OWN_MESSAGES': False,
+        'USE_NLP_QA': False,
+        'NLP_QA_PREFIX': '>',
+        'NLP_QA_DATA_FORMAT': 'csv'
     }
 
     _COMMANDS_JSON_SCHEMA = {
@@ -69,6 +74,8 @@ class Bot(twitchio.ext.commands.Bot):
         '''
 
         self._load_commands()
+        self._load_nlp_qa()
+
         super().__init__(
             irc_token=self.config['IRC_TOKEN'], 
             client_id=self.config['CLIENT_ID'], 
@@ -155,6 +162,13 @@ class Bot(twitchio.ext.commands.Bot):
 
         self.logger.info('Finished loading commands ({}).'.format(count))
 
+    def _load_nlp_qa(self):
+        if not self.config['USE_NLP_QA']: return
+
+        data_path = str(Path(self.config['NLP_QA_DATA_PATH']).resolve().absolute())
+        self.nlp_qa_model = init_nlp_model(data_path, self.config['NLP_QA_DATA_FORMAT'])
+        self.logger.info('Finished building NLP QA model.')
+
     async def event_ready(self):
         '''
         Raised when the bot is ready.
@@ -168,6 +182,20 @@ class Bot(twitchio.ext.commands.Bot):
         '''
 
         if self.config['DISPLAY_MESSAGES']:
-            self.logger.info('{}: {} (in #{})'.format(message.author.name, message.content, message.channel))
+            is_own_message = message.author.name.lower() == self.config['NICK'].lower()
+            display_own = self.config['DISPLAY_OWN_MESSAGES']
+            if display_own or not display_own and not is_own_message:
+                self.logger.info('{}: {} (in #{})'.format(message.author.name, message.content, message.channel))
 
-        await self.handle_commands(message)
+        if self.config['USE_NLP_QA'] and message.content.startswith(self.config['NLP_QA_PREFIX']):
+            clean_message = message.content[1:]
+            prediction = self.nlp_qa_model([clean_message])
+            if len(prediction[0]) > 0:                
+                ctx = await self.get_context(message)
+                print()
+                await ctx.send(prediction[0][0])
+        else:
+            try:
+                await self.handle_commands(message)
+            except twitchio.ext.commands.errors.CommandError:
+                pass
