@@ -188,7 +188,7 @@ class Bot(twitchio.ext.commands.Bot):
                 self.logger.info('{}: {} (in #{})'.format(message.author.name, message.content, message.channel))
 
         if self.config['USE_NLP_QA'] and message.content.startswith(self.config['NLP_QA_PREFIX']):
-            clean_message = message.content[1:]
+            clean_message = message.content[1:].strip()
             prediction = self.nlp_qa_model([clean_message])
             if len(prediction[0]) > 0:                
                 ctx = await self.get_context(message)
