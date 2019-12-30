@@ -8,6 +8,7 @@ from pathlib import Path
 from glumbot.logger import init as init_logger
 from glumbot.config import Config
 from glumbot.nlp_qa.model import Model as NLPModel, ModelType as NLPModelType
+import glumbot.commands.builtin
 import twitchio.ext.commands
 
 class Bot(twitchio.ext.commands.Bot):
@@ -95,6 +96,8 @@ class Bot(twitchio.ext.commands.Bot):
         Load and initialize commands from JSON.
         '''
 
+        builtin_path = str(Path(glumbot.commands.builtin.__file__).parent.resolve().absolute())
+
         # The command_json_path is relative to the working directory, NOT the instance folder.
         command_json_path = Path(self.config['COMMANDS_FILE'])
         count = 0
@@ -124,7 +127,7 @@ class Bot(twitchio.ext.commands.Bot):
                 script_module = None
                 if 'script' in command:
                     # The script path is relative to the command JSON file...
-                    script_path = (command_json_path.parent / Path(command['script'])).resolve().absolute()
+                    script_path = (command_json_path.parent / Path(command['script'].format(BUILTIN_PATH=builtin_path))).resolve().absolute()
                     if not script_path.exists():
                         self.logger.warn('Encountered error in processing custom script for command with name \'{}\'. \
                             Could not find the file at path \'{}\'.'.format(command['name'], str(script_path)))
