@@ -8,6 +8,7 @@ from pathlib import Path
 from glumbot.logger import init as init_logger
 from glumbot.config import Config
 from glumbot.nlp_qa.model import Model as NLPModel, ModelType as NLPModelType
+from glumbot.integrations import setup as setup_integrations
 import glumbot.commands.builtin
 import twitchio.ext.commands
 
@@ -65,6 +66,7 @@ class Bot(twitchio.ext.commands.Bot):
         '''
         
         self.config = Config(Bot._CONFIG_DEFAULTS)
+        self.cogs = {}
 
     def init_logger(self):
         '''
@@ -80,6 +82,8 @@ class Bot(twitchio.ext.commands.Bot):
 
         self._load_commands()
         self._load_nlp_qa()
+        
+        setup_integrations(self)
 
         super().__init__(
             irc_token=self.config['IRC_TOKEN'], 

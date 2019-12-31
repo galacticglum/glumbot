@@ -11,7 +11,7 @@ class ModelType(Enum):
     FAST_TEXT = 1,
     TF_IDF_LOG_REG = 2
 
-class Model(object):
+class Model:
     _MODEL_CONFIG_NAMES = {
         ModelType.FAST_TEXT: 'model_config_fasttext.json',
         ModelType.TF_IDF_LOG_REG: 'model_config_tfidf_logreg.json'
