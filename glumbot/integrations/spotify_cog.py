@@ -7,6 +7,7 @@ class SpotifyCog:
 
     def __init__(self, bot):
         self.bot = bot
+        bot.spotify_cog = self
 
         # Authenticate...
         username = bot.config['SPOTIFY_USERNAME']
@@ -15,11 +16,11 @@ class SpotifyCog:
             client_secret=bot.config['SPOTIFY_CLIENT_SECRET'],
             redirect_uri=bot.config['SPOTIFY_REDIRECT_URI']
         )
-        
+
 
         if token:
-            self.sp = spotipy.Spotify(auth=token)
+            self.client = spotipy.Spotify(auth=token)
             bot.logger.info('Spotify - successfully authenticated!')
         else:
-            self.sp = None
+            self.client = None
             bot.logger.warn('Spotify - cannot authenticate user \'\'.'.format(username))
