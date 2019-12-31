@@ -13,6 +13,7 @@ from glumbot.config import Config
 from glumbot.nlp_qa.model import Model as NLPModel, ModelType as NLPModelType
 from glumbot.integrations import setup as setup_integrations
 import glumbot.commands.builtin
+import twitchio.dataclasses
 import twitchio.ext.commands
 
 class BotArgumentParser(argparse.ArgumentParser):
@@ -289,7 +290,12 @@ class Bot(twitchio.ext.commands.Bot):
             self.logger.info('Matched NLP query (message = "{}", prediction = \"{}\", confidence = {:.3f})' \
                 .format(clean_message, prediction, confidence))
 
-            await ctx.send(prediction)
+            await self.handle_commands(twitchio.dataclasses.Message(
+                author=message.author,
+                channel=message.channel,
+                content=prediction,
+                clean_content=prediction
+            ))
         else:
             try:
                 await self.handle_commands(message)
