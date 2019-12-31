@@ -1,4 +1,4 @@
-async def execute(self, ctx, parameters, *args):
+async def execute(self, ctx, parameters, args):
     track = self.spotify_cog.client.current_user_playing_track()
     is_offline = await self.get_stream(str(ctx.message.channel)) is None
     if is_offline and not parameters['show_songs_offline'] or track is None or not track['is_playing']: return

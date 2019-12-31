@@ -1,9 +1,12 @@
+import sys
 import json
 import uuid
 import inspect
+import argparse
 import importlib.util
 from jsonschema import validate as validate_json
 from pathlib import Path
+from pydoc import locate as locate_type
 
 from glumbot.logger import init as init_logger
 from glumbot.config import Config
@@ -11,6 +14,33 @@ from glumbot.nlp_qa.model import Model as NLPModel, ModelType as NLPModelType
 from glumbot.integrations import setup as setup_integrations
 import glumbot.commands.builtin
 import twitchio.ext.commands
+
+class BotArgumentParser(argparse.ArgumentParser):
+    def _get_action_from_name(self, name):
+        '''
+        Given a name, get the Action instance registered with this parser.
+        If only it were made available in the ArgumentError object. It is 
+        passed as it's first arg...
+        '''
+
+        container = self._actions
+        if name is None:
+            return None
+        for action in container:
+            if '/'.join(action.option_strings) == name:
+                return action
+            elif action.metavar == name:
+                return action
+            elif action.dest == name:
+                return action
+
+    def error(self, message):
+        exception = sys.exc_info()[1]
+        if exception:
+            exception.argument = self._get_action_from_name(exception.argument_name)
+            raise exception
+        else:
+            raise argparse.ArgumentError(None, message)
 
 class Bot(twitchio.ext.commands.Bot):
     _CONFIG_DEFAULTS = {
@@ -26,38 +56,39 @@ class Bot(twitchio.ext.commands.Bot):
 
     _COMMANDS_JSON_SCHEMA = {
         'type': 'array',
-        'items': {
-            'type': 'object'
-        }
+        'items': {'type': 'object'}
     }
 
     _COMMAND_JSON_SCHEMA = {
         'type': 'object',
         'properties': {
-                'name': {
-                    'type': 'string'
-                },
-                'response': {
-                    'type': 'string'
-                },
-                'script': {
-                    'type': 'string'
-                },
+                'name': {'type': 'string'},
+                'description': {'type': 'string'},
+                'args': {'type': 'object'},
+                'response': {'type': 'string'},
+                'script': {'type': 'string'},
                 'aliases': {
                     'type': 'array',
                     'items': {
                         'type': 'string'
                     }
                 },
-                'parameters': {
-                    'type': 'object'
-                }
+                'parameters': {'type': 'object'}
             },
         'required': ['name'],
         'anyOf': [
             {'required': ['response']},
             {'required': ['script']}
         ]
+    }
+
+    _COMMAND_ARG_JSON_SCHEMA = {
+        'type': 'object',
+        'properties': {
+            'type': {'type': 'string'},
+            'help': {'type': 'string'},
+            'default': {}
+        }
     }
 
     def __init__(self):
@@ -159,21 +190,37 @@ class Bot(twitchio.ext.commands.Bot):
 
                         if not valid:
                             delattr(script_module, 'execute')
-                
-                def create_command_func(command, script_module):
+
+                def create_command_func(command, script_module, argparser):
                     async def _command_handler(self, ctx, *args):
+                        try:
+                            known_args, _ = argparser.parse_known_args(args)
+                        except argparse.ArgumentError as exception:
+                            await ctx.send(exception.message)
+                            return
+
                         if 'response' in command:
                             await ctx.send(command['response'])
 
                         if script_module and hasattr(script_module, 'execute'):
                             parameters = command['parameters'] if 'parameters' in command else None
-                            await script_module.execute(self, ctx, parameters, *args)
+                            await script_module.execute(self, ctx, parameters, known_args)
 
                     return _command_handler
 
+                command_args = command.get('args', dict())
+                command_argparser = BotArgumentParser(description=command.get('description', None))
+                for arg_name in command_args:
+                    arg = command_args[arg_name]
+                    # TODO: Add more extensive implementation of argparse (i.e. support more features)...
+                    arg_type = locate_type(arg['type']) if 'type' in arg else None
+                    command_argparser.add_argument(arg_name, type=arg_type, help=arg.get('help', None))
+                    if 'default' in arg:
+                        command_argparser.set_defaults(**{arg_name: arg['default']})
+
                 command_object = twitchio.ext.commands.Command(
                     name=command['name'], 
-                    func=create_command_func(command, script_module), 
+                    func=create_command_func(command, script_module, command_argparser), 
                     aliases=command['aliases'] if 'aliases' in command else None, 
                     no_global_checks=False
                 )
