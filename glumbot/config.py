@@ -9,7 +9,7 @@ class Config(object):
         if defaults is not None and isinstance(defaults, dict):
             self._CONFIG = defaults
 
-    def from_pyfile(self, filename, root_path='instance', overwrite=True):
+    def from_pyfile(self, filename, root_path, overwrite=True):
         '''
         Adds a Python file as a configuration file.
 

@@ -44,6 +44,7 @@ class BotArgumentParser(argparse.ArgumentParser):
 
 class Bot(twitchio.ext.commands.Bot):
     _CONFIG_DEFAULTS = {
+        'INSTANCE_PATH': str(Path('./instance').resolve().absolute()),
         'APP_NAME': __name__,
         'PREFIX': '!',
         'DISPLAY_MESSAGES': True,
@@ -51,7 +52,8 @@ class Bot(twitchio.ext.commands.Bot):
         'USE_NLP_QA': False,
         'NLP_QA_PREFIX': '>',
         'NLP_QA_DATA_FORMAT': 'csv',
-        'NLP_MODEL_TYPE': NLPModelType.FAST_TEXT
+        'NLP_MODEL_TYPE': NLPModelType.FAST_TEXT,
+        'SPOTIFY_AUTH_CACHE_FILENAME': 'spotify_auth.cache'
     }
 
     _COMMANDS_JSON_SCHEMA = {
@@ -73,7 +75,11 @@ class Bot(twitchio.ext.commands.Bot):
                         'type': 'string'
                     }
                 },
-                'parameters': {'type': 'object'}
+                'parameters': {'type': 'object'},
+                'execute_function': {
+                    'type': 'string',
+                    'minLength': 1
+                }
             },
         'required': ['name'],
         'anyOf': [
@@ -87,6 +93,15 @@ class Bot(twitchio.ext.commands.Bot):
         'properties': {
             'type': {'type': 'string'},
             'help': {'type': 'string'},
+            'nargs': {
+                'anyOf': [
+                    { 'type': 'integer' },
+                    { 
+                        'type': 'string',
+                        'enum': ['?', '*', '+', 'REMAINDER']
+                    }
+                ]
+            },
             'default': {}
         }
     }
@@ -160,6 +175,8 @@ class Bot(twitchio.ext.commands.Bot):
                 method_name = 'commandhandler_{}_{}'.format(command['name'], command_id)
 
                 script_module = None
+                execute_fname = command.get('execute_function', 'execute')
+
                 if 'script' in command:
                     # The script path is relative to the command JSON file...
                     script_path = (command_json_path.parent / Path(command['script'].format(BUILTIN_PATH=builtin_path))).resolve().absolute()
@@ -173,25 +190,30 @@ class Bot(twitchio.ext.commands.Bot):
                     spec.loader.exec_module(script_module)
 
                     # Verify that the execute method has a valid signature...
-                    if hasattr(script_module, 'execute'):
+                    if hasattr(script_module, execute_fname):
                         valid = True
-                        if len(inspect.signature(script_module.execute).parameters) < 3:
-                            self.logger.warn('Encountered error in processing custom script for command with name \'{}\'. \
-                                The execute method has an invalid signature. At least two parameters are required for the class \
-                                instance and context parameters; \'self\', \'ctx\', and \'parameters\' respectively.'.format(command['name']))
+                        execute_func = getattr(script_module, execute_fname)
+                        if len(inspect.signature(execute_func).parameters) < 3:
+                            self.logger.warn('Encountered error in processing custom script for command with name \'{}\'. ' +
+                                'The \'{}\' method has an invalid signature. At least two parameters are required for the class ' +
+                                'instance and context parameters; \'self\', \'ctx\', and \'parameters\' respectively.' \
+                                    .format(command['name'], execute_fname))
 
                             valid = False
-                        elif not inspect.iscoroutinefunction(script_module.execute):
-                            self.logger.warn('Encountered error in processing custom script for command with name \'{}\'. \
-                                The execute method must be a coroutine function (a function defined with an async def syntax).' \
-                                    .format(command['name']))
+                        elif not inspect.iscoroutinefunction(execute_func):
+                            self.logger.warn('Encountered error in processing custom script for command with name \'{}\'. ' +
+                                'The \'{}\' method must be a coroutine function (a function defined with an async def syntax).' \
+                                    .format(command['name'], execute_fname))
                                     
                             valid = False
 
                         if not valid:
-                            delattr(script_module, 'execute')
+                            delattr(script_module, execute_fname)
+                    else:
+                        self.logger.warn('Encountered error in processing custom script for command with name \'{}\'. '
+                            'The \'{}\' method could not be found.'.format(command['name'], execute_fname))
 
-                def create_command_func(command, script_module, argparser):
+                def create_command_func(command, script_module, execute_fname, argparser):
                     async def _command_handler(self, ctx, *args):
                         try:
                             known_args, _ = argparser.parse_known_args(args)
@@ -202,9 +224,9 @@ class Bot(twitchio.ext.commands.Bot):
                         if 'response' in command:
                             await ctx.send(command['response'])
 
-                        if script_module and hasattr(script_module, 'execute'):
+                        if script_module and hasattr(script_module, execute_fname):
                             parameters = command['parameters'] if 'parameters' in command else None
-                            await script_module.execute(self, ctx, parameters, known_args)
+                            await getattr(script_module, execute_fname)(self, ctx, parameters, known_args)
 
                     return _command_handler
 
@@ -214,13 +236,17 @@ class Bot(twitchio.ext.commands.Bot):
                     arg = command_args[arg_name]
                     # TODO: Add more extensive implementation of argparse (i.e. support more features)...
                     arg_type = locate_type(arg['type']) if 'type' in arg else None
-                    command_argparser.add_argument(arg_name, type=arg_type, help=arg.get('help', None))
+                    nargs = None
+                    if 'nargs' in arg:
+                        nargs = argparse.REMAINDER if arg['nargs'] == 'REMAINDER' else arg['nargs']
+                    
+                    command_argparser.add_argument(arg_name, type=arg_type, nargs=nargs, help=arg.get('help', None))
                     if 'default' in arg:
                         command_argparser.set_defaults(**{arg_name: arg['default']})
 
                 command_object = twitchio.ext.commands.Command(
                     name=command['name'], 
-                    func=create_command_func(command, script_module, command_argparser), 
+                    func=create_command_func(command, script_module, execute_fname, command_argparser), 
                     aliases=command['aliases'] if 'aliases' in command else None, 
                     no_global_checks=False
                 )
