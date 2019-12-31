@@ -284,6 +284,8 @@ class Bot(twitchio.ext.commands.Bot):
 
         if self.config['USE_NLP_QA'] and message.content.startswith(self.config['NLP_QA_PREFIX']):
             clean_message = message.content[1:].strip()
+            if not clean_message: return
+
             ctx = await self.get_context(message)
 
             prediction, confidence = self.nlp_qa_model.predict([clean_message])
