@@ -2,8 +2,8 @@ import datetime
 from glumbot.utils import list_join, pluralize_value
 
 async def execute(self, ctx, parameters, args):
-    current_stream = await self.get_stream(str('quill18'))
-    caster_user = await self.get_caster_user('quill18')
+    current_stream = await self.get_stream(str(ctx.message.channel))
+    caster_user = await self.get_caster_user(ctx.message.channel)
     if current_stream is None:
         await ctx.send(parameters['offline_message'].format(caster_name=caster_user.display_name))
     else:
