@@ -8,13 +8,13 @@ from pathlib import Path
 from deeppavlov import train_model
 
 class ModelType(Enum):
-    FAST_TEXT = 1,
-    TF_IDF_LOG_REG = 2
+    FastText = 1,
+    TFIDFLogReg = 2
 
 class Model:
     _MODEL_CONFIG_NAMES = {
-        ModelType.FAST_TEXT: 'model_config_fasttext.json',
-        ModelType.TF_IDF_LOG_REG: 'model_config_tfidf_logreg.json'
+        ModelType.FastText: 'model_config_fasttext.json',
+        ModelType.TFIDFLogReg: 'model_config_tfidf_logreg.json'
     }
 
     def __init__(self, model_type, data_path, data_format='csv'):
@@ -45,9 +45,9 @@ class Model:
 
     def predict(self, values):
         prediction = self.model(values)
-        if self.type == ModelType.TF_IDF_LOG_REG:
+        if self.type == ModelType.TFIDFLogReg:
             prediction = [prediction[0][0], max(prediction[1][0])]
-        elif self.type == ModelType.FAST_TEXT:
+        elif self.type == ModelType.FastText:
             prediction = [prediction[0][0], prediction[1][0]]
 
         return prediction

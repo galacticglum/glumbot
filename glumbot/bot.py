@@ -1,9 +1,11 @@
+import re
 import sys
 import json
 import uuid
 import inspect
 import argparse
 import importlib.util
+from enum import Enum
 from jsonschema import validate as validate_json
 from pathlib import Path
 from pydoc import locate as locate_type
@@ -43,6 +45,31 @@ class BotArgumentParser(argparse.ArgumentParser):
         else:
             raise argparse.ArgumentError(None, message)
 
+class CommandPermissionLevel(Enum):
+    '''
+    Permission levels for command usage.
+    '''
+
+    Everyone = 1,
+    Follower = 2,
+    Subscriber = 3,
+    Moderator = 4,
+    Editor = 5,
+    Caster = 6
+
+    @classmethod
+    def get_names_for_schema(cls):
+        def to_snake_case(name):
+            s1 = re.sub(r'(.)([A-Z][a-z]+)', r'\1_\2', name)
+            return re.sub(r'([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+        
+        return [to_snake_case(value.name) for value in CommandPermissionLevel]
+
+    @classmethod
+    def from_snake_case_name(cls, name):
+        name = ''.join(x.capitalize() or '_' for x in name.split('_'))
+        return cls[name]
+
 class Bot(twitchio.ext.commands.Bot):
     _CONFIG_DEFAULTS = {
         'INSTANCE_PATH': str(Path('./instance').resolve().absolute()),
@@ -53,16 +80,16 @@ class Bot(twitchio.ext.commands.Bot):
         'USE_NLP_QA': False,
         'NLP_QA_PREFIX': '>',
         'NLP_QA_DATA_FORMAT': 'csv',
-        'NLP_MODEL_TYPE': NLPModelType.FAST_TEXT,
+        'NLP_MODEL_TYPE': NLPModelType.FastText,
         'SPOTIFY_AUTH_CACHE_FILENAME': 'spotify_auth.cache'
     }
 
-    _COMMANDS_JSON_SCHEMA = {
+    _COMMANDS_SCHEMA = {
         'type': 'array',
         'items': {'type': 'object'}
     }
 
-    _COMMAND_JSON_SCHEMA = {
+    _COMMAND_SCHEMA = {
         'type': 'object',
         'properties': {
                 'name': {'type': 'string'},
@@ -80,6 +107,10 @@ class Bot(twitchio.ext.commands.Bot):
                 'execute_function': {
                     'type': 'string',
                     'minLength': 1
+                },
+                'permission': {
+                    'type': 'string',
+                    'enum': CommandPermissionLevel.get_names_for_schema()
                 }
             },
         'required': ['name'],
@@ -89,7 +120,7 @@ class Bot(twitchio.ext.commands.Bot):
         ]
     }
 
-    _COMMAND_ARG_JSON_SCHEMA = {
+    _COMMAND_ARG_SCHEMA = {
         'type': 'object',
         'properties': {
             'type': {'type': 'string'},
@@ -114,6 +145,7 @@ class Bot(twitchio.ext.commands.Bot):
         
         self.config = Config(Bot._CONFIG_DEFAULTS)
         self.cogs = {}
+        self._caster_users_cache = {}
 
     def init_logger(self):
         '''
@@ -157,14 +189,14 @@ class Bot(twitchio.ext.commands.Bot):
             command_filepath_str = str(command_json_path.resolve())
 
             try:
-                validate_json(instance=commands, schema=Bot._COMMANDS_JSON_SCHEMA)
+                validate_json(instance=commands, schema=Bot._COMMANDS_SCHEMA)
             except:
                 error_message = 'Could not load commands from file \'{}\'.'
                 self.logger.exception(error_message.format(command_filepath_str))
 
             for command in commands:
                 try:
-                    validate_json(instance=command, schema=Bot._COMMAND_JSON_SCHEMA)
+                    validate_json(instance=command, schema=Bot._COMMAND_SCHEMA)
                 except:
                     error_message = 'Could not load command with name \'{}\' from file \'{{}}\''.format(command['name']) if 'name' in command \
                         else 'Could not load command from file \'{}\'.'
@@ -214,6 +246,26 @@ class Bot(twitchio.ext.commands.Bot):
                         self.logger.warn('Encountered error in processing custom script for command with name \'{}\'. '
                             'The \'{}\' method could not be found.'.format(command['name'], execute_fname))
 
+                command_args = command.get('args', dict())
+                command_argparser = BotArgumentParser(description=command.get('description', None))
+                for arg_name in command_args:
+                    arg = command_args[arg_name]
+                    try:
+                        validate_json(instance=arg, schema=Bot._COMMAND_ARG_SCHEMA)
+                    except:
+                        self.logger.exception('Could not setup command argument with name \'{}\', from command with name \'{}\''.format(arg_name, command['name']))
+                        continue
+
+                    # TODO: Add more extensive implementation of argparse (i.e. support more features)...
+                    arg_type = locate_type(arg['type']) if 'type' in arg else None
+                    nargs = None
+                    if 'nargs' in arg:
+                        nargs = argparse.REMAINDER if arg['nargs'] == 'REMAINDER' else arg['nargs']
+                    
+                    command_argparser.add_argument(arg_name, type=arg_type, nargs=nargs, help=arg.get('help', None))
+                    if 'default' in arg:
+                        command_argparser.set_defaults(**{arg_name: arg['default']})
+
                 def create_command_func(command, script_module, execute_fname, argparser):
                     async def _command_handler(self, ctx, *args):
                         try:
@@ -231,19 +283,24 @@ class Bot(twitchio.ext.commands.Bot):
 
                     return _command_handler
 
-                command_args = command.get('args', dict())
-                command_argparser = BotArgumentParser(description=command.get('description', None))
-                for arg_name in command_args:
-                    arg = command_args[arg_name]
-                    # TODO: Add more extensive implementation of argparse (i.e. support more features)...
-                    arg_type = locate_type(arg['type']) if 'type' in arg else None
-                    nargs = None
-                    if 'nargs' in arg:
-                        nargs = argparse.REMAINDER if arg['nargs'] == 'REMAINDER' else arg['nargs']
-                    
-                    command_argparser.add_argument(arg_name, type=arg_type, nargs=nargs, help=arg.get('help', None))
-                    if 'default' in arg:
-                        command_argparser.set_defaults(**{arg_name: arg['default']})
+                def create_permission_check(permission_level, bot):
+                    async def _permission_check(ctx):
+                        if permission_level == CommandPermissionLevel.Everyone: return True
+                        if permission_level == CommandPermissionLevel.Follower:
+                            caster_user = await bot.get_caster_user(str(ctx.message.channel))
+                            follow_relationship = await bot.get_follow(ctx.author.id, caster_user.id)
+                            return follow_relationship is not None
+
+                        if permission_level == CommandPermissionLevel.Subscriber: return ctx.author.is_subscriber()
+                        if permission_level == CommandPermissionLevel.Moderator: return ctx.author.is_mod
+                        if permission_level == CommandPermissionLevel.Editor:
+                            raise NotImplementedError('The command permission level \'Editor\' is not implemented.')
+
+                        if permission_level == CommandPermissionLevel.Caster:
+                            caster_user = await bot.get_caster_user(str(ctx.message.channel))
+                            return caster_user.id == ctx.author.id
+
+                    return _permission_check 
 
                 command_object = twitchio.ext.commands.Command(
                     name=command['name'], 
@@ -251,6 +308,9 @@ class Bot(twitchio.ext.commands.Bot):
                     aliases=command['aliases'] if 'aliases' in command else None, 
                     no_global_checks=False
                 )
+                
+                command_permission = CommandPermissionLevel.from_snake_case_name(command.get('permission', 'everyone'))
+                command_object._checks.append(create_permission_check(command_permission, self))
 
                 setattr(self.__class__, method_name, command_object)
                 count += 1
@@ -268,7 +328,7 @@ class Bot(twitchio.ext.commands.Bot):
         '''
         Raised when the bot is ready.
         '''
-
+    
         self.logger.info('Twitch bot is ready!')
     
     async def event_message(self, message):
@@ -299,7 +359,33 @@ class Bot(twitchio.ext.commands.Bot):
                 clean_content=prediction
             ))
         else:
-            try:
-                await self.handle_commands(message)
-            except twitchio.ext.commands.errors.CommandError:
-                pass
+            await self.handle_commands(message)
+
+    async def handle_commands(self, message):
+        try:
+            await super().handle_commands(message)
+        except twitchio.ext.commands.errors.CommandError:
+            pass
+
+    async def event_command_error(self, ctx, error):
+        '''
+        Raised on an error in command execution.
+        '''
+
+        self.logger.warning('Excpetion in command: {0}:'.format(error))
+
+    async def get_caster_user(self, channel):
+        '''
+        Gets the user object associated with the specified channel name.
+        '''
+
+        if channel in self._caster_users_cache:
+            return self._caster_users_cache[channel]
+
+        user = await self.get_users(channel)
+        if user is None or len(user) == 0:
+            raise Exception('Could not locate user information given the channel name \'{}\''.format(channel))
+
+        user = user[0]
+        self._caster_users_cache[channel] = user
+        return user
