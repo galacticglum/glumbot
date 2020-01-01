@@ -2,18 +2,20 @@ import re
 import sys
 import json
 import uuid
+import logging
 import inspect
 import argparse
+import traceback
 import importlib.util
 from enum import Enum
-from jsonschema import validate as validate_json
 from pathlib import Path
 from pydoc import locate as locate_type
+from jsonschema import validate as validate_json
 
-from glumbot.logger import init as init_logger
 from glumbot.config import Config
-from glumbot.nlp_qa.model import Model as NLPModel, ModelType as NLPModelType
+from glumbot.logger import init as init_logger
 from glumbot.integrations import setup as setup_integrations
+from glumbot.nlp_qa.model import Model as NLPModel, ModelType as NLPModelType
 import glumbot.commands.builtin
 import twitchio.dataclasses
 import twitchio.ext.commands
@@ -287,7 +289,7 @@ class Bot(twitchio.ext.commands.Bot):
                     async def _permission_check(ctx):
                         if permission_level == CommandPermissionLevel.Everyone: return True
                         if permission_level == CommandPermissionLevel.Follower:
-                            caster_user = await bot.get_caster_user(str(ctx.message.channel))
+                            caster_user = await bot.get_caster_user(ctx.message.channel)
                             follow_relationship = await bot.get_follow(ctx.author.id, caster_user.id)
                             return follow_relationship is not None
 
@@ -297,7 +299,7 @@ class Bot(twitchio.ext.commands.Bot):
                             raise NotImplementedError('The command permission level \'Editor\' is not implemented.')
 
                         if permission_level == CommandPermissionLevel.Caster:
-                            caster_user = await bot.get_caster_user(str(ctx.message.channel))
+                            caster_user = await bot.get_caster_user(ctx.message.channel)
                             return caster_user.id == ctx.author.id
 
                     return _permission_check 
@@ -371,14 +373,18 @@ class Bot(twitchio.ext.commands.Bot):
         '''
         Raised on an error in command execution.
         '''
+        
+        is_checkfailure = isinstance(error, twitchio.ext.commands.errors.CheckFailure)
+        self.logger.log(logging.DEBUG if is_checkfailure else logging.ERROR, 'Excpetion in command: {0}:'.format(error))
+        if not is_checkfailure:
+            traceback.print_exception(type(error), error, error.__traceback__)
 
-        self.logger.warning('Excpetion in command: {0}:'.format(error))
-
-    async def get_caster_user(self, channel):
+    async def get_caster_user(self, channel: [str, twitchio.dataclasses.Channel]):
         '''
         Gets the user object associated with the specified channel name.
         '''
 
+        channel = str(channel)
         if channel in self._caster_users_cache:
             return self._caster_users_cache[channel]
 
