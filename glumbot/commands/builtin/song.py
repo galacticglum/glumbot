@@ -1,6 +1,5 @@
 async def execute(self, ctx, parameters, args):
-    # TODO: Fix async HTTP calls for they do not work right now!
-    is_offline = await self.get_stream('galacticglum') is None
+    is_offline = await self.get_stream(str(ctx.message.channel)) is None
     if is_offline and not parameters['show_songs_offline']: return
     
     track = self.spotify_cog.client.current_user_playing_track()
