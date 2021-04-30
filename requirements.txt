@@ -57,7 +57,7 @@ starlette==0.12.8
 thinc==7.0.8
 tqdm==4.32.2
 -e git://github.com/GalacticGlum/TwitchIO.git@9b8714d9af86da3e74b571ddb1407689ab7f2c9b#egg=twitchio
-urllib3==1.25.7
+urllib3==1.25.8
 uvicorn==0.9.0
 wasabi==0.5.0
 websockets==8.1
