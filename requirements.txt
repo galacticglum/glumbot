@@ -60,6 +60,6 @@ tqdm==4.32.2
 urllib3==1.25.7
 uvicorn==0.9.0
 wasabi==0.5.0
-websockets==8.1
+websockets==9.1
 yarl==1.4.2
 zipp==0.6.0
